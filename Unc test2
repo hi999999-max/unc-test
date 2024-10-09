@@ -1,304 +1,248 @@
-local totalTests = 0
-local passedTests = 0
+repeat task.wait() until game:IsLoaded()
 
-local function test(name, functions, func)
-    totalTests = totalTests + 1
-    local success, result = pcall(function()
-        return func()
-    end)
-    if success then
-        print(name .. " passed: " .. (result or ""))
-        passedTests = passedTests + 1
-    else
-        print(name .. " failed: " .. result)
+loadstring(game:HttpGet("https://raw.githubusercontent.com/Pixeluted/adoniscries/main/Source.lua", true))()
+
+local Workspace = game:GetService("Workspace")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Stats = game:GetService("Stats")
+
+local player = Players.LocalPlayer
+local playerCamera = Workspace.CurrentCamera
+
+local TargetedPlayer = nil
+local TargetedPlayerCharacter = nil
+local TargetedPlayerAimPart = nil
+local HighlightedPlayer = nil
+
+local Silent = {
+    Settings = {
+        Toggled = true,
+        AimPart = "UpperTorso",
+        HitChance = 9999,
+        Prediction = {
+            Toggled = true,
+            Value = 0,
+            AutoPred = true,
+            JumpOffset = -0.06,
+        },
+        Circle = {
+            Visible = true,
+            Transparency = 0.5,
+            Thickness = 3,
+            NumSides = 100,
+            Radius = 100,
+            Filled = false,
+        },
+        RainbowTarget = true,
+        WallCheck = true,
+    },
+}
+
+local function GetPing()
+    return tonumber(Stats.Network.ServerStatsItem["Data Ping"]:GetValueString():match("%d+")) or 0
+end
+
+local function UpdatePredictionBasedOnPing()
+    if Silent.Settings.Prediction.AutoPred then
+        local ping = GetPing()
+        if ping < 20 then
+            Silent.Settings.Prediction.Value = 0.097285846595
+        elseif ping < 30 then
+            Silent.Settings.Prediction.Value = 0.10698238794
+        elseif ping < 40 then
+            Silent.Settings.Prediction.Value = 0.116678929285
+        elseif ping < 45 then
+            Silent.Settings.Prediction.Value = 0.12251287574925
+        elseif ping < 50 then
+            Silent.Settings.Prediction.Value = 0.13575
+        elseif ping < 55 then
+            Silent.Settings.Prediction.Value = 0.1425375
+        elseif ping < 60 then
+            Silent.Settings.Prediction.Value = 0.124521314351673817351423414
+        elseif ping < 65 then
+            Silent.Settings.Prediction.Value = 0.1307473800692575082189945847
+        elseif ping < 70 then
+            Silent.Settings.Prediction.Value = 0.132345567567
+        elseif ping < 75 then
+            Silent.Settings.Prediction.Value = 0.13896284594535
+        elseif ping < 80 then
+            Silent.Settings.Prediction.Value = 0.131314253678192031927365421456789331
+        elseif ping < 85 then
+            Silent.Settings.Prediction.Value = 0.140690614067
+        elseif ping < 90 then
+            Silent.Settings.Prediction.Value = 0.1355991245213413214231231123121
+        elseif ping < 95 then
+            Silent.Settings.Prediction.Value = 0.137959574332
+        elseif ping < 100 then
+            Silent.Settings.Prediction.Value = 0.174857178355
+        elseif ping < 105 then
+            Silent.Settings.Prediction.Value = 0.138312341526738912
+        elseif ping < 110 then
+            Silent.Settings.Prediction.Value = 0.1845537197
+        elseif ping < 120 then
+            Silent.Settings.Prediction.Value = 0.194250261045
+        elseif ping < 125 then
+            Silent.Settings.Prediction.Value = 0.1512783311111111111111111111111111111111111
+        else
+            Silent.Settings.Prediction.Value = 0.20394680239
+        end
     end
 end
 
-local function getExecutorLevel()
-    -- Dummy function; replace with actual implementation to detect the executor's security level
-    return "Level 8"
+task.spawn(function()
+    while true do
+        UpdatePredictionBasedOnPing()
+        task.wait(0)
+    end
+end)
+
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Visible = Silent.Settings.Circle.Visible
+FOVCircle.Transparency = Silent.Settings.Circle.Transparency
+FOVCircle.Thickness = Silent.Settings.Circle.Thickness
+FOVCircle.NumSides = Silent.Settings.Circle.NumSides
+FOVCircle.Radius = Silent.Settings.Circle.Radius
+FOVCircle.Filled = Silent.Settings.Circle.Filled
+
+local function SmoothColorTransition()
+    local hue = 0
+    while true do
+        for t = 0, 1, 0.01 do
+            hue = (hue + 0.01) % 1
+            FOVCircle.Color = Color3.fromHSV(hue, 1, 1)
+            task.wait(0.01)
+        end
+    end
 end
 
--- Add all test cases here
-test("identifyexecutor", {"getexecutorname"}, function()
-    local name, version = identifyexecutor()
-    assert(type(name) == "string", "Did not return a string for the name")
-    assert(type(version) == "string", "Did not return a string for the version")
-    return "Executor Name: " .. name .. ", Version: " .. version
+task.spawn(SmoothColorTransition)
+
+RunService.RenderStepped:Connect(function()
+    FOVCircle.Position = Vector2.new(playerCamera.ViewportSize.X / 2, playerCamera.ViewportSize.Y / 2)
 end)
 
-test("lz4compress", {}, function()
-    local raw = "Hello, world!"
-    local compressed = lz4compress(raw)
-    assert(type(compressed) == "string", "Compression did not return a string")
-    assert(lz4decompress(compressed, #raw) == raw, "Decompression did not return the original string")
-    return "LZ4 compression and decompression passed"
+local function IsBehindWall(part)
+    local rayOrigin = playerCamera.CFrame.Position
+    local rayDirection = (part.Position - rayOrigin).Unit * (part.Position - rayOrigin).Magnitude
+    local rayParams = RaycastParams.new()
+    rayParams.FilterDescendantsInstances = {player.Character, part.Parent}
+    rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+    local rayResult = Workspace:Raycast(rayOrigin, rayDirection, rayParams)
+    return rayResult ~= nil
+end
+
+local function IsPlayerInFront(targetPart)
+    local cameraLookVector = playerCamera.CFrame.LookVector
+    local directionToTarget = (targetPart.Position - playerCamera.CFrame.Position).Unit
+    local dotProduct = cameraLookVector:Dot(directionToTarget)
+    return dotProduct > 0
+end
+
+local function GetClosestPlayer()
+    local ClosestPlayer = nil
+    local ShortestDistance = math.huge
+    for _, Player in ipairs(Players:GetPlayers()) do
+        if Player ~= player and Player.Character then
+            local PlayerPart = Player.Character:FindFirstChild(Silent.Settings.AimPart)
+            if PlayerPart and PlayerPart:IsA("BasePart") then
+                local PlayerScreenPosition = playerCamera:WorldToViewportPoint(PlayerPart.Position)
+                local MagnitudeDistance = (Vector2.new(PlayerScreenPosition.X, PlayerScreenPosition.Y) - Vector2.new(playerCamera.ViewportSize.X / 2, playerCamera.ViewportSize.Y / 2)).Magnitude
+                if MagnitudeDistance <= FOVCircle.Radius and MagnitudeDistance < ShortestDistance and IsPlayerInFront(PlayerPart) then
+                    if Silent.Settings.WallCheck then
+                        if not IsBehindWall(PlayerPart) then
+                            ClosestPlayer = Player
+                            ShortestDistance = MagnitudeDistance
+                        end
+                    else
+                        ClosestPlayer = Player
+                        ShortestDistance = MagnitudeDistance
+                    end
+                end
+            end
+        end
+    end
+    return ClosestPlayer
+end
+
+RunService.RenderStepped:Connect(function()
+    TargetedPlayer = GetClosestPlayer()
+    if TargetedPlayer and TargetedPlayer.Character and TargetedPlayer.Character:FindFirstChild(Silent.Settings.AimPart) then
+        TargetedPlayerCharacter = TargetedPlayer.Character
+        TargetedPlayerAimPart = TargetedPlayerCharacter:FindFirstChild(Silent.Settings.AimPart)
+        if Silent.Settings.RainbowTarget then
+            if not HighlightedPlayer or HighlightedPlayer ~= TargetedPlayer then
+                if HighlightedPlayer and HighlightedPlayer.Character then
+                    local highlight = HighlightedPlayer.Character:FindFirstChild("Highlight")
+                    if highlight then
+                        highlight:Destroy()
+                    end
+                end
+                HighlightedPlayer = TargetedPlayer
+                local highlight = Instance.new("Highlight", TargetedPlayer.Character)
+                highlight.FillColor = Color3.new(1, 0, 0)
+                highlight.OutlineColor = Color3.new(1, 1, 1)
+                highlight.OutlineTransparency = 0.5
+                highlight.FillTransparency = 0.5
+                highlight.Adornee = TargetedPlayer.Character
+            end
+        elseif HighlightedPlayer and HighlightedPlayer ~= TargetedPlayer then
+            local highlight = HighlightedPlayer.Character:FindFirstChild("Highlight")
+            if highlight then
+                highlight:Destroy()
+            end
+            HighlightedPlayer = nil
+        end
+    elseif HighlightedPlayer then
+        local highlight = HighlightedPlayer.Character:FindFirstChild("Highlight")
+        if highlight then
+            highlight:Destroy()
+        end
+        HighlightedPlayer = nil
+    end
+    FOVCircle.Position = Vector2.new(playerCamera.ViewportSize.X / 2, playerCamera.ViewportSize.Y / 2)
 end)
 
-test("lz4decompress", {}, function()
-    local raw = "Hello, world!"
-    local compressed = lz4compress(raw)
-    assert(type(compressed) == "string", "Compression did not return a string")
-    assert(lz4decompress(compressed, #raw) == raw, "Decompression did not return the original string")
-    return "LZ4 decompression passed"
-end)
+local RawMetaTable = getrawmetatable(game)
+local OldRawMetaTable = RawMetaTable.__namecall
+setreadonly(RawMetaTable, false)
 
-test("messagebox", {}, function()
-    -- Placeholder test for messagebox
-    return "Messagebox test not implemented"
-end)
+math.randomseed(os.time())
 
-test("queue_on_teleport", {"queueonteleport"}, function()
-    return pcall(queueonteleport, function() end) and "Function queued successfully" or "Failed to queue function"
-end)
+RawMetaTable.__namecall = newcclosure(function(...)
+    local RemoteArguments = {...}
+    if Silent.Settings.Toggled and getnamecallmethod() == "FireServer" and TargetedPlayer and TargetedPlayerCharacter and TargetedPlayerAimPart then
+        local VelocityPrediction = TargetedPlayerAimPart.AssemblyLinearVelocity * Silent.Settings.Prediction.Value
+        local JumpOffset = Vector3.new(0, Silent.Settings.Prediction.JumpOffset, 0)
+        local Hit_Success = math.random(100) <= Silent.Settings.HitChance
 
-test("request", {"http.request", "http_request"}, function()
-    local response = request({
-        Url = "https://httpbin.org/user-agent",
-        Method = "GET",
-    })
-    assert(type(response) == "table", "Response must be a table")
-    assert(response.StatusCode == 200, "Did not return a 200 status code")
-    local data = game:GetService("HttpService"):JSONDecode(response.Body)
-    assert(type(data) == "table" and type(data["user-agent"]) == "string", "Did not return a table with a user-agent key")
-    return "User-Agent: " .. data["user-agent"]
-end)
-
-test("setclipboard", {"toclipboard"}, function()
-    setclipboard("Testing Clipboard")
-    return "Clipboard set successfully"
-end)
-
-test("setfpscap", {}, function()
-    local function measureFpsCap(targetFps)
-        local renderStepped = game:GetService("RunService").RenderStepped
-        local sum = 0
-        local count = 0
-
-        setfpscap(targetFps)
-        for _ = 1, 5 do
-            local startTime = tick()
-            renderStepped:Wait()
-            local elapsed = tick() - startTime
-            sum = sum + (1 / elapsed)
-            count = count + 1
+        for index, arg in ipairs(RemoteArguments) do
+            if typeof(arg) == "Vector3" then
+                if Hit_Success then
+                    if Silent.Settings.Prediction.Toggled then
+                        RemoteArguments[index] = TargetedPlayerAimPart.Position + VelocityPrediction + JumpOffset
+                    else
+                        RemoteArguments[index] = TargetedPlayerAimPart.Position + JumpOffset
+                    end
+                end
+            elseif typeof(arg) == "table" then
+                for key, value in pairs(arg) do
+                    if typeof(value) == "Vector3" then
+                        if Hit_Success then
+                            if Silent.Settings.Prediction.Toggled then
+                                arg[key] = TargetedPlayerAimPart.Position + VelocityPrediction + JumpOffset
+                            else
+                                arg[key] = TargetedPlayerAimPart.Position + JumpOffset
+                            end
+                        end
+                    end
+                end
+            end
         end
 
-        return math.round(sum / count)
+        return OldRawMetaTable(unpack(RemoteArguments))
     end
-
-    local fps60 = measureFpsCap(60)
-    local fps0 = measureFpsCap(0)
-
-    return fps60 .. "fps @60 • " .. fps0 .. "fps @0"
+    return OldRawMetaTable(...)
 end)
 
-test("getgc", {}, function()
-    local gc = getgc()
-    assert(type(gc) == "table", "Did not return a table")
-    assert(#gc > 0, "Did not return a table with any values")
-    return "GC table contains " .. #gc .. " items"
-end)
-
-test("getgenv", {}, function()
-    getgenv().__TEST_GLOBAL = true
-    assert(__TEST_GLOBAL, "Failed to set a global variable")
-    getgenv().__TEST_GLOBAL = nil
-    return "Global variable set and unset successfully"
-end)
-
-test("getloadedmodules", {}, function()
-    local modules = getloadedmodules()
-    assert(type(modules) == "table", "Did not return a table")
-    assert(#modules > 0, "Did not return a table with any values")
-    assert(typeof(modules[1]) == "Instance", "First value is not an Instance")
-    assert(modules[1]:IsA("ModuleScript"), "First value is not a ModuleScript")
-    return "Loaded modules test passed"
-end)
-
-test("getrenv", {}, function()
-    assert(_G ~= getrenv()._G, "The variable _G in the executor is identical to _G in the game")
-    return "Execution environment is isolated"
-end)
-
-test("getrunningscripts", {}, function()
-    local scripts = getrunningscripts()
-    assert(type(scripts) == "table", "Did not return a table")
-    assert(#scripts > 0, "Did not return a table with any values")
-    assert(typeof(scripts[1]) == "Instance", "First value is not an Instance")
-    assert(scripts[1]:IsA("ModuleScript") or scripts[1]:IsA("LocalScript"), "First value is not a ModuleScript or LocalScript")
-    return "Running scripts retrieved"
-end)
-
-test("getscriptbytecode", {"dumpstring"}, function()
-    local animate = game:GetService("Players").LocalPlayer.Character.Animate
-    local bytecode = getscriptbytecode(animate)
-    assert(type(bytecode) == "string", "Did not return a string for Character.Animate")
-    return "Bytecode retrieved for Character.Animate"
-end)
-
-test("getscripthash", {}, function()
-    local animate = game:GetService("Players").LocalPlayer.Character.Animate:Clone()
-    local hash = getscripthash(animate)
-    local source = animate.Source
-    animate.Source = "print('Hello, world!')"
-    task.defer(function()
-        animate.Source = source
-    end)
-    local newHash = getscripthash(animate)
-    assert(hash ~= newHash, "Did not return a different hash for a modified script")
-    assert(newHash == getscripthash(animate), "Did not return the same hash for a script with the same source")
-    return "Hash test passed"
-end)
-
-test("getscripts", {}, function()
-    local scripts = getscripts()
-    assert(type(scripts) == "table", "Did not return a table")
-    assert(#scripts > 0, "Did not return a table with any values")
-    assert(typeof(scripts[1]) == "Instance", "First value is not an Instance")
-    assert(scripts[1]:IsA("ModuleScript") or scripts[1]:IsA("LocalScript"), "First value is not a ModuleScript or LocalScript")
-    return "Scripts retrieved successfully"
-end)
-
-test("getsenv", {}, function()
-    local animate = game:GetService("Players").LocalPlayer.Character.Animate
-    local env = getsenv(animate)
-    assert(type(env) == "table", "Did not return a table for Character.Animate")
-    assert(env.script == animate, "The script global is not identical to Character.Animate")
-    return "Environment retrieved for Character.Animate"
-end)
-
-test("getthreadidentity", {"getidentity", "getthreadcontext"}, function()
-    assert(type(getthreadidentity()) == "number", "Did not return a number")
-    return "Thread identity retrieved"
-end)
-
-test("setthreadidentity", {"setidentity", "setthreadcontext"}, function()
-    setthreadidentity(3)
-    assert(getthreadidentity() == 3, "Did not set the thread identity")
-    return "Thread identity set to 3"
-end)
-
-test("Drawing.new", {}, function()
-    local drawing = Drawing.new("Square")
-    drawing.Visible = false
-    local canDestroy = pcall(function()
-        drawing:Destroy()
-    end)
-    assert(canDestroy, "Drawing:Destroy() should not throw an error")
-    return "Drawing creation and destruction test passed"
-end)
-
-test("Drawing.Fonts", {}, function()
-    assert(Drawing.Fonts.UI == 0, "Did not return the correct id for UI")
-    assert(Drawing.Fonts.System == 1, "Did not return the correct id for System")
-    assert(Drawing.Fonts.Plex == 2, "Did not return the correct id for Plex")
-    assert(Drawing.Fonts.Monospace == 3, "Did not return the correct id for Monospace")
-    return "Drawing fonts test passed"
-end)
-
-test("isrenderobj", {}, function()
-    local drawing = Drawing.new("Image")
-    drawing.Visible = true
-    assert(isrenderobj(drawing) == true, "Did not return true for an Image")
-    assert(isrenderobj(newproxy()) == false, "Did not return false for a blank table")
-    return "Render object test passed"
-end)
-
-test("getrenderproperty", {}, function()
-    local drawing = Drawing.new("Image")
-    drawing.Visible = true
-    assert(type(getrenderproperty(drawing, "Visible")) == "boolean", "Did not return a boolean value for Image.Visible")
-    local success, result = pcall(function()
-        return getrenderproperty(drawing, "Color")
-    end)
-    if not success or not result then
-        return "Image.Color is not supported"
-    end
-    return "Render property retrieval test passed"
-end)
-
-test("setrenderproperty", {}, function()
-    local drawing = Drawing.new("Square")
-    drawing.Visible = true
-    setrenderproperty(drawing, "Visible", false)
-    assert(drawing.Visible == false, "Did not set the value for Square.Visible")
-    return "Render property set successfully"
-end)
-
-test("cleardrawcache", {}, function()
-    cleardrawcache()
-    return "Draw cache cleared"
-end)
-
-test("setff", {"setff"}, function()
-    -- Placeholder for advanced functionality
-    return "setff test not implemented"
-end)
-
-test("setsteam", {"setsteam"}, function()
-    -- Placeholder for advanced functionality
-    return "setsteam test not implemented"
-end)
-
-test("getthreadidentity", {"getidentity", "getthreadcontext"}, function()
-    assert(type(getthreadidentity()) == "number", "Did not return a number")
-    return "Thread identity retrieval test passed"
-end)
-
-test("setthreadidentity", {"setidentity", "setthreadcontext"}, function()
-    setthreadidentity(3)
-    assert(getthreadidentity() == 3, "Did not set the thread identity")
-    return "Thread identity set successfully"
-end)
-
-test("setfpscap", {}, function()
-    local function measureFpsCap(targetFps)
-        local renderStepped = game:GetService("RunService").RenderStepped
-        local sum = 0
-        local count = 0
-
-        setfpscap(targetFps)
-        for _ = 1, 5 do
-            local startTime = tick()
-            renderStepped:Wait()
-            local elapsed = tick() - startTime
-            sum = sum + (1 / elapsed)
-            count = count + 1
-        end
-
-        return math.round(sum / count)
-    end
-
-    local fps60 = measureFpsCap(60)
-    local fps0 = measureFpsCap(0)
-
-    return fps60 .. "fps @60 • " .. fps0 .. "fps @0"
-end)
-
--- Print Results
-local function printResults()
-    local percentage = (passedTests / totalTests) * 100
-    local level = getExecutorLevel()
-
-    print("\nTotal Tests: " .. totalTests)
-    print("Passed Tests: " .. passedTests)
-    print("Percentage: " .. string.format("%.2f", percentage) .. "%")
-
-    if percentage >= 80 then
-        print("Executor Quality: Excellent")
-    elseif percentage >= 60 then
-        print("Executor Quality: Good")
-    elseif percentage >= 40 then
-        print("Executor Quality: Fair")
-    else
-        print("Executor Quality: Poor")
-    end
-
-    print("Executor Security Level: " .. tostring(level))
-end
-
-print("Starting Tests...\n")
-
--- Add all test functions here
-printResults()
+setreadonly(RawMetaTable, true)
